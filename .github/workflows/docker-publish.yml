@@ -8,7 +8,7 @@ name: Build and Publish MicroWARP
 # ==========================================
 on:
   push:
-    branches:[ "main", "master", "dev" ]
+    branches: [ "main", "master", "dev" ]
   release:
     types: [published]
   workflow_dispatch:
