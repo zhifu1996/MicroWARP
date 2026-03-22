@@ -4,6 +4,9 @@ set -e
 WG_CONF="/etc/wireguard/wg0.conf"
 mkdir -p /etc/wireguard
 
+# ==========================================
+# 1. 账号全自动申请与配置生成 (阅后即焚)
+# ==========================================
 if [ ! -f "$WG_CONF" ]; then
     echo "==> [MicroWARP] 未检测到配置，正在全自动初始化 Cloudflare WARP..."
     
@@ -24,6 +27,8 @@ if [ ! -f "$WG_CONF" ]; then
     ./wgcf generate > /dev/null
     
     mv wgcf-profile.conf "$WG_CONF"
+    
+    # 【核心安全】阅后即焚：删除注册工具和生成的账号明文文件
     rm -f wgcf wgcf-account.toml
     echo "==> [MicroWARP] 节点配置生成成功！"
 else
@@ -31,24 +36,53 @@ else
 fi
 
 # ==========================================
-# 强力洗白与内核兼容性处理
+# 2. 强力洗白与内核兼容性处理 (魔改 wg0.conf)
 # ==========================================
+# 删除多余的内网 IP 路由和 DNS，让全局流量通过 wg0
 sed -i 's/^AllowedIPs.*/AllowedIPs = 0.0.0.0\/0/g' "$WG_CONF"
 sed -i '/Address.*:/d' "$WG_CONF" 
 sed -i '/^DNS.*/d' "$WG_CONF"
+
+# 删除 Alpine 系统自带 wg-quick 中不兼容的路由标记
 sed -i '/src_valid_mark/d' /usr/bin/wg-quick
 
+# 【新增：抗断流绝杀】强制注入 15 秒 UDP 心跳保活，对抗运营商 QoS 丢包
+if ! grep -q "PersistentKeepalive" "$WG_CONF"; then
+    sed -i '/\[Peer\]/a PersistentKeepalive = 15' "$WG_CONF"
+else
+    sed -i 's/PersistentKeepalive.*/PersistentKeepalive = 15/g' "$WG_CONF"
+fi
+
+# 【新增：防阻断绝杀】针对 HK/US 强校验机房，注入自定义优选 Endpoint IP
+if [ -n "$ENDPOINT_IP" ]; then
+    echo "==> [MicroWARP] 🔀 检测到自定义 Endpoint IP，正在覆盖默认节点: $ENDPOINT_IP"
+    sed -i "s/^Endpoint.*/Endpoint = $ENDPOINT_IP/g" "$WG_CONF"
+fi
+
 # ==========================================
-# 拉起内核网卡
+# 3. 拉起内核网卡
 # ==========================================
 echo "==> [MicroWARP] 正在启动 Linux 内核级 wg0 网卡..."
 wg-quick up wg0 > /dev/null 2>&1
 
 echo "==> [MicroWARP] 当前出口 IP 已成功变更为："
-curl -s https://1.1.1.1/cdn-cgi/trace | grep ip=
+# 获取最新的 CF 溯源 IP (加入 || true 防止网络波动导致脚本退出)
+curl -s https://1.1.1.1/cdn-cgi/trace | grep ip= || true
 
 # ==========================================
-# 启动 SOCKS5 代理服务
+# 4. 启动 C 语言 SOCKS5 代理服务 (带高级参数绑定)
 # ==========================================
-echo "==>[MicroWARP] 🚀 MicroSOCKS 引擎已启动，正在监听 0.0.0.0:1080"
-exec microsocks -i 0.0.0.0 -p 1080
+# 读取环境变量，如果未设置则使用默认值 0.0.0.0 和 1080
+LISTEN_ADDR=${BIND_ADDR:-"0.0.0.0"}
+LISTEN_PORT=${BIND_PORT:-"1080"}
+
+if [ -n "$SOCKS_USER" ] && [ -n "$SOCKS_PASS" ]; then
+    echo "==> [MicroWARP] 🔒 身份认证已开启 (User: $SOCKS_USER)"
+    echo "==> [MicroWARP] 🚀 MicroSOCKS 引擎已启动，正在监听 ${LISTEN_ADDR}:${LISTEN_PORT}"
+    # 使用 exec 接管进程，实现 Zero-Overhead 的底层进程控制
+    exec microsocks -i "$LISTEN_ADDR" -p "$LISTEN_PORT" -u "$SOCKS_USER" -P "$SOCKS_PASS"
+else
+    echo "==>[MicroWARP] ⚠️ 未设置密码，当前为匿名公开访问模式"
+    echo "==>[MicroWARP] 🚀 MicroSOCKS 引擎已启动，正在监听 ${LISTEN_ADDR}:${LISTEN_PORT}"
+    exec microsocks -i "$LISTEN_ADDR" -p "$LISTEN_PORT"
+fi
