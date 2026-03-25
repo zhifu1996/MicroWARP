@@ -91,8 +91,21 @@ fi
 # ==========================================
 # 3. 拉起内核网卡
 # ==========================================
+# 在启用 WARP 前记录 100.64.0.0/10 的原始回程路径，避免发布端口后 Tailscale 客户端握手卡死
+PRE_WARP_ROUTE=$(ip route get 100.64.0.1 2>/dev/null | head -n 1 || true)
+PRE_WARP_GW=$(printf '%s\n' "$PRE_WARP_ROUTE" | awk '{for (i = 1; i <= NF; i++) if ($i == "via") print $(i + 1)}')
+PRE_WARP_DEV=$(printf '%s\n' "$PRE_WARP_ROUTE" | awk '{for (i = 1; i <= NF; i++) if ($i == "dev") print $(i + 1)}')
+
 echo "==> [MicroWARP] 正在启动 Linux 内核级 wg0 网卡..."
 wg-quick up wg0 > /dev/null 2>&1
+
+# 仅在 WARP 启动前确实存在原始回程路径时恢复 100.64.0.0/10，减少对非 Tailscale 场景的影响
+TAILSCALE_CIDR=${TAILSCALE_CIDR:-"100.64.0.0/10"}
+if [ -n "$PRE_WARP_GW" ] && [ -n "$PRE_WARP_DEV" ]; then
+    if ip route replace "$TAILSCALE_CIDR" via "$PRE_WARP_GW" dev "$PRE_WARP_DEV" > /dev/null 2>&1; then
+        echo "==> [MicroWARP] 已为 ${TAILSCALE_CIDR} 恢复 WARP 启动前的回程路由: via ${PRE_WARP_GW} dev ${PRE_WARP_DEV}"
+    fi
+fi
 
 echo "==> [MicroWARP] 当前出口 IP 已成功变更为："
 # 获取最新的 CF 溯源 IP (加入 5 秒强制超时，完美替代有缺陷的 & 后台执行)
