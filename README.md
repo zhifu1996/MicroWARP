@@ -186,4 +186,4 @@ nohup gost -F=socks5://admin:123456@127.0.0.1:1080 -L=http://:8081 > /dev/null 2
 
 ---
 
-*特别鸣谢: __LinuxDo__, __NodeSeek__ (排名不分先后)* ❤️
+*特别鸣谢: __LinuxDo__ ❤️
