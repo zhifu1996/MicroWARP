@@ -260,6 +260,11 @@ if [ -f "$TEAM_INFO" ]; then
         echo "==> [MicroWARP] [Team] 检测到 Reserved 字节，切换至 wireguard-go 用户态实现"
         export WG_QUICK_USERSPACE_IMPLEMENTATION=wireguard-go
         export WG_RESERVED="$reserved_dec"
+        # wireguard-go 需要 TUN 设备
+        mkdir -p /dev/net
+        [ -e /dev/net/tun ] || mknod /dev/net/tun c 10 200
+        # 抑制 "kernel has first class support" 警告
+        export WG_I_PREFER_BUGGY_USERSPACE_TO_POLISHED_KMOD=1
         # 强制 wg-quick 使用 wireguard-go (绕过内核模块)
         sed -i '/^add_if() {$/a\\t[[ -n $WG_QUICK_USERSPACE_IMPLEMENTATION ]] \&\& { cmd "$WG_QUICK_USERSPACE_IMPLEMENTATION" "$INTERFACE"; return; }' /usr/bin/wg-quick
     fi
