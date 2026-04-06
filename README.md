@@ -92,12 +92,38 @@ MicroWARP supports environment variables to customize your setup while keeping t
       - BIND_PORT=1080        # Custom SOCKS5 port
       - SOCKS_USER=admin      # Enable authentication
       - SOCKS_PASS=123456     # Auth password
-      
+
       # ⚠️ Port Hopping (Mitigating Datacenter QoS):
       # If your VPS is in a datacenter (e.g., DMIT, AWS) where UDP 2408 is throttled or blocked,
       # use port 4500 (standard IPsec NAT-T) to bypass restrictive firewall rules.
-      - ENDPOINT_IP=162.159.192.1:4500 
+      - ENDPOINT_IP=162.159.192.1:4500
 ```
+
+### WARP Team (Zero Trust) Mode
+
+MicroWARP supports Cloudflare WARP Team for higher-quality egress IPs (warp=plus) while maintaining the ~800KB memory footprint.
+
+**Prerequisites:**
+1. A Cloudflare Zero Trust account (50-user free plan works)
+2. Device Profile tunnel protocol set to **WireGuard** (not MASQUE)
+   - Path: Zero Trust Dashboard → Settings → WARP Client → Device Profiles → Tunnel protocol
+
+**Getting your Token:**
+1. Visit `https://{team-name}.cloudflareaccess.com/warp` in a browser
+2. Complete org authentication
+3. Press F12, find the element containing `com.cloudflare.warp://`
+4. Copy the JWT string after `?token=`
+
+**Configuration:**
+```yaml
+    environment:
+      - TEAM_TOKEN=eyJhbGciOi...your JWT Token...
+      - BIND_PORT=1080
+      - SOCKS_USER=admin
+      - SOCKS_PASS=123456
+```
+
+> The token is only used once during initial registration. After successful registration, the config is persisted to the Docker Volume and the token is no longer needed.
 
 ---
 
@@ -165,12 +191,38 @@ MicroWARP 支持通过环境变量进行参数定制：
       - SOCKS_USER=admin      # SOCKS5 认证用户名 (留空则为无密码模式)
       - SOCKS_PASS=123456     # SOCKS5 认证密码
       - GH_PROXY=https://github.ednovas.xyz # 代理 wgcf 二进制下载地址
-      
+
       # ⚠️ 网络连通性优化 (Port Hopping)
       # 针对部分对 UDP 2408 端口存在 QoS 限制的机房（如 DMIT、搬瓦工等）。
       # 可将端口修改为 4500 (标准 IPsec NAT-T 端口) 规避审查特征，提升连通率。
       - ENDPOINT_IP=162.159.192.1:4500
 ```
+
+### WARP Team (Zero Trust) 模式
+
+MicroWARP 支持 Cloudflare WARP Team，获取更高质量的出口 IP（warp=plus），同时保持 800KB 的极低内存占用。
+
+**前提条件：**
+1. 拥有 Cloudflare Zero Trust 账户（50 用户免费）
+2. Device Profile 隧道协议设为 **WireGuard**（非 MASQUE）
+   - 路径：Zero Trust Dashboard → Settings → WARP Client → Device Profiles → Tunnel protocol
+
+**获取 Token：**
+1. 浏览器访问 `https://{team-name}.cloudflareaccess.com/warp`
+2. 完成组织认证
+3. 在成功页面按 F12，找到包含 `com.cloudflare.warp://` 的元素
+4. 复制 URL 中 `?token=` 后的 JWT 字符串
+
+**配置示例：**
+```yaml
+    environment:
+      - TEAM_TOKEN=eyJhbGciOi...你的JWT Token...
+      - BIND_PORT=1080
+      - SOCKS_USER=admin
+      - SOCKS_PASS=123456
+```
+
+> Token 仅在首次注册时使用一次。注册成功后配置持久化到 Docker Volume，后续重启无需 Token。
 
 ### 🚀 扩展用法：转换为 HTTP 代理
 
