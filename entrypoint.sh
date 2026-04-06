@@ -250,6 +250,8 @@ if [ -f "$TEAM_INFO" ]; then
         echo "==> [MicroWARP] [Team] 检测到 Reserved 字节，切换至 wireguard-go 用户态实现"
         export WG_QUICK_USERSPACE_IMPLEMENTATION=wireguard-go
         export WG_RESERVED="$reserved_dec"
+        # 强制 wg-quick 使用 wireguard-go (绕过内核模块)
+        sed -i '/^add_if() {$/a\\t[[ -n $WG_QUICK_USERSPACE_IMPLEMENTATION ]] \&\& { cmd "$WG_QUICK_USERSPACE_IMPLEMENTATION" "$INTERFACE"; return; }' /usr/bin/wg-quick
     fi
 fi
 
