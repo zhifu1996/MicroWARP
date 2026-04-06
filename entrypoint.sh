@@ -89,6 +89,9 @@ register_team() {
 
     echo "==> [MicroWARP] [Team] 设备注册成功! (account_type=$ACCT_TYPE)"
 
+    # 提取 IPv6 地址 (Team API 可能返回)
+    V6_ADDR=$(echo "$HTTP_BODY" | jq -r '.result.config.interface.addresses.v6 // empty')
+
     # 生成 wg0.conf
     cat > "$WG_CONF_PATH" <<WGEOF
 [Interface]
@@ -100,6 +103,9 @@ PublicKey = $PEER_PUB
 AllowedIPs = 0.0.0.0/0
 Endpoint = $ENDPOINT
 WGEOF
+    if [ -n "$V6_ADDR" ]; then
+        sed -i "/^Address/a Address = ${V6_ADDR}/128" "$WG_CONF_PATH"
+    fi
 
     # 安全清理：私钥已写入配置文件，从内存中清除
     unset PRIVKEY
@@ -172,6 +178,9 @@ fi
 # 1. 智能提取出纯 IPv4 地址 (防止 wgcf v2.2.30 将双栈 IP 写在同一行导致误杀)
 IPV4_ADDR=$(grep '^Address' "$WG_CONF" | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}/[0-9]{1,2}' | head -n 1)
 
+# 1b. 提取 IPv6 地址 (如果存在)
+IPV6_ADDR=$(grep '^Address' "$WG_CONF" | tr ',' '\n' | grep ':' | sed 's/.*= *//' | tr -d ' ' | head -n 1)
+
 # 2. 物理删除所有原始的 Address, AllowedIPs, DNS，防止 RTNETLINK 崩溃或 DNS 死锁
 sed -i '/^Address/d' "$WG_CONF"
 sed -i '/^AllowedIPs/d' "$WG_CONF"
@@ -180,6 +189,9 @@ sed -i '/^DNS.*/d' "$WG_CONF"
 # 3. 重建最纯净的 IPv4 路由规则
 if [ -n "$IPV4_ADDR" ]; then
     sed -i "/\[Interface\]/a Address = $IPV4_ADDR" "$WG_CONF"
+fi
+if [ -n "$IPV6_ADDR" ]; then
+    sed -i "/^Address/a Address = $IPV6_ADDR" "$WG_CONF"
 fi
 sed -i "/\[Peer\]/a AllowedIPs = 0.0.0.0\/0" "$WG_CONF"
 
@@ -195,8 +207,29 @@ fi
 
 # 【新增：防阻断绝杀】针对 HK/US 强校验机房，注入自定义优选 Endpoint IP
 if [ -n "$ENDPOINT_IP" ]; then
-    echo "==> [MicroWARP] 🔀 检测到自定义 Endpoint IP，正在覆盖默认节点: $ENDPOINT_IP"
+    echo "==> [MicroWARP] 检测到自定义 Endpoint IP，正在覆盖默认节点: $ENDPOINT_IP"
     sed -i "s/^Endpoint.*/Endpoint = $ENDPOINT_IP/g" "$WG_CONF"
+fi
+
+# 应用用户持久化的出口模式偏好 (由 warp.sh 写入)
+WARP_MODE_CONF="/etc/wireguard/warp-mode.conf"
+if [ -f "$WARP_MODE_CONF" ]; then
+    . "$WARP_MODE_CONF"
+    case "${MODE:-v4}" in
+        v6)
+            sed -i '/^AllowedIPs/d' "$WG_CONF"
+            sed -i "/\[Peer\]/a AllowedIPs = ::\/0" "$WG_CONF"
+            echo "==> [MicroWARP] 出口模式: 纯 IPv6"
+            ;;
+        dual)
+            sed -i '/^AllowedIPs/d' "$WG_CONF"
+            sed -i "/\[Peer\]/a AllowedIPs = 0.0.0.0\/0, ::\/0" "$WG_CONF"
+            echo "==> [MicroWARP] 出口模式: 双栈 (${PRIORITY:-v4} 优先)"
+            ;;
+        *)
+            echo "==> [MicroWARP] 出口模式: 纯 IPv4"
+            ;;
+    esac
 fi
 
 # ==========================================
@@ -209,6 +242,17 @@ PRE_WARP_DEV=$(printf '%s\n' "$PRE_WARP_ROUTE" | awk '{for (i = 1; i <= NF; i++)
 
 echo "==> [MicroWARP] 正在启动 Linux 内核级 wg0 网卡..."
 wg-quick up wg0 > /dev/null 2>&1
+
+# 双栈模式下应用路由优先级
+if [ -f "$WARP_MODE_CONF" ] && [ "${MODE:-}" = "dual" ]; then
+    if [ "${PRIORITY:-v4}" = "v6" ]; then
+        ip -4 route replace default dev wg0 metric 20 2>/dev/null || true
+        ip -6 route replace default dev wg0 metric 10 2>/dev/null || true
+    else
+        ip -4 route replace default dev wg0 metric 10 2>/dev/null || true
+        ip -6 route replace default dev wg0 metric 20 2>/dev/null || true
+    fi
+fi
 
 # 仅在 WARP 启动前确实存在原始回程路径时恢复 100.64.0.0/10，减少对非 Tailscale 场景的影响
 TAILSCALE_CIDR=${TAILSCALE_CIDR:-"100.64.0.0/10"}
