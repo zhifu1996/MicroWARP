@@ -13,6 +13,13 @@ services:
     sysctls:
       - net.ipv4.conf.all.src_valid_mark=1
     # environment:
+    #   # ---- WARP Team (Zero Trust) 模式 ----
+    #   # 设置 TEAM_TOKEN 后自动切换为 Team 模式，获取更高质量的出口 IP
+    #   # 获取方式: 浏览器访问 https://{team-name}.cloudflareaccess.com/warp 完成认证后提取 JWT
+    #   # 前提: Zero Trust Dashboard 的 Device Profile 隧道协议需设为 WireGuard (非 MASQUE)
+    #   - TEAM_TOKEN=eyJhbGciOi...    # Cloudflare Teams JWT Token，留空则走免费 WARP
+    #
+    #   # ---- 通用配置 ----
     #   - BIND_ADDR=0.0.0.0           # SOCKS5 监听地址，默认 0.0.0.0
     #   - BIND_PORT=1080              # SOCKS5 监听端口，默认 1080
     #   - SOCKS_USER=admin            # SOCKS5 认证用户名，留空则为无密码模式
