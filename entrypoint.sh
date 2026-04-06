@@ -14,6 +14,106 @@ build_wgcf_download_url() {
     echo "$RAW_URL"
 }
 
+register_team() {
+    TEAM_JWT=$1
+    WG_CONF_PATH=$2
+
+    echo "==> [MicroWARP] [Team] 正在通过 Zero Trust API 注册设备..."
+
+    # 生成 WireGuard 密钥对
+    PRIVKEY=$(wg genkey)
+    PUBKEY=$(echo "$PRIVKEY" | wg pubkey)
+
+    # 调用 Cloudflare Teams 注册 API
+    RESPONSE=$(curl -s -m 15 -w "\n%{http_code}" -X POST \
+        "https://zero-trust-client.cloudflareclient.com/v0i2308311933/reg" \
+        -H "User-Agent: 1.1.1.1/6.23" \
+        -H "CF-Client-Version: i-6.23-2308311933.1" \
+        -H "Content-Type: application/json" \
+        -H "Cf-Access-Jwt-Assertion: $TEAM_JWT" \
+        -d "{
+            \"key\": \"$PUBKEY\",
+            \"tos\": \"$(date -u +%Y-%m-%dT%H:%M:%S.000Z)\",
+            \"model\": \"iPad13,8\",
+            \"fcm_token\": \"\",
+            \"device_token\": \"\"
+        }")
+
+    # 分离 HTTP body 和状态码
+    HTTP_BODY=$(echo "$RESPONSE" | sed '$d')
+    HTTP_CODE=$(echo "$RESPONSE" | tail -n 1)
+
+    # 检查 HTTP 状态码
+    case "$HTTP_CODE" in
+        200) ;;
+        401|403)
+            echo "==> [ERROR] Team Token 无效或已过期 (HTTP $HTTP_CODE)，请重新获取"
+            echo "==> [ERROR] 获取方式: 浏览器访问 https://{team-name}.cloudflareaccess.com/warp"
+            exit 1
+            ;;
+        000)
+            echo "==> [ERROR] 网络连接超时，无法访问 Cloudflare Teams API"
+            exit 1
+            ;;
+        *)
+            echo "==> [ERROR] Teams API 返回错误 (HTTP $HTTP_CODE):"
+            echo "$HTTP_BODY"
+            exit 1
+            ;;
+    esac
+
+    # 检查 API 是否返回成功
+    API_SUCCESS=$(echo "$HTTP_BODY" | jq -r '.success // empty')
+    if [ "$API_SUCCESS" != "true" ]; then
+        echo "==> [ERROR] Teams API 返回失败:"
+        echo "$HTTP_BODY" | jq -r '.errors[]? // empty'
+        exit 1
+    fi
+
+    # 解析响应中的关键字段
+    PEER_PUB=$(echo "$HTTP_BODY" | jq -r '.result.config.peers[0].public_key // empty')
+    ENDPOINT=$(echo "$HTTP_BODY" | jq -r '.result.config.peers[0].endpoint.host // empty')
+    V4_ADDR=$(echo "$HTTP_BODY" | jq -r '.result.config.interface.addresses.v4 // empty')
+    CLIENT_ID=$(echo "$HTTP_BODY" | jq -r '.result.config.client_id // empty')
+    ACCT_TYPE=$(echo "$HTTP_BODY" | jq -r '.result.account.account_type // empty')
+
+    # 验证必要字段
+    if [ -z "$PEER_PUB" ] || [ -z "$ENDPOINT" ] || [ -z "$V4_ADDR" ]; then
+        echo "==> [ERROR] API 响应格式异常，缺少必要的 WireGuard 配置字段"
+        echo "==> [DEBUG] peer_pub=$PEER_PUB endpoint=$ENDPOINT v4=$V4_ADDR"
+        exit 1
+    fi
+
+    echo "==> [MicroWARP] [Team] 设备注册成功! (account_type=$ACCT_TYPE)"
+
+    # 生成 wg0.conf
+    cat > "$WG_CONF_PATH" <<WGEOF
+[Interface]
+PrivateKey = $PRIVKEY
+Address = ${V4_ADDR}/32
+
+[Peer]
+PublicKey = $PEER_PUB
+AllowedIPs = 0.0.0.0/0
+Endpoint = $ENDPOINT
+WGEOF
+
+    # 保存 Team 信息 (client_id 用于 Reserved 字节，备用)
+    if [ -n "$CLIENT_ID" ]; then
+        RESERVED_HEX=$(echo -n "$CLIENT_ID" | base64 -d 2>/dev/null | od -An -tx1 | tr -d ' \n')
+        RESERVED_DEC=$(echo -n "$CLIENT_ID" | base64 -d 2>/dev/null | od -An -tu1 | tr -s ' ' ',' | sed 's/^,//;s/,$//')
+        TEAM_INFO_PATH="$(dirname "$WG_CONF_PATH")/team_info"
+        cat > "$TEAM_INFO_PATH" <<TIEOF
+client_id=$CLIENT_ID
+reserved_hex=$RESERVED_HEX
+reserved_dec=$RESERVED_DEC
+TIEOF
+        echo "==> [MicroWARP] [Team] Reserved 字节: hex=0x${RESERVED_HEX} dec=${RESERVED_DEC}"
+    fi
+
+    echo "==> [MicroWARP] [Team] WireGuard 配置生成完毕!"
+}
+
 if [ "${MICROWARP_TEST_MODE:-0}" = "1" ]; then
     return 0 2>/dev/null || exit 0
 fi
@@ -24,7 +124,14 @@ mkdir -p /etc/wireguard
 # ==========================================
 # 1. 账号全自动申请与配置生成 (阅后即焚)
 # ==========================================
-if [ ! -f "$WG_CONF" ]; then
+if [ -f "$WG_CONF" ]; then
+    echo "==> [MicroWARP] 检测到已有持久化配置，跳过注册。"
+elif [ -n "${TEAM_TOKEN:-}" ]; then
+    # ---- Team (Zero Trust) 模式 ----
+    echo "==> [MicroWARP] 检测到 TEAM_TOKEN，进入 Zero Trust 注册模式..."
+    register_team "$TEAM_TOKEN" "$WG_CONF"
+else
+    # ---- 免费 WARP 模式 (原有逻辑) ----
     echo "==> [MicroWARP] 未检测到配置，正在全自动初始化 Cloudflare WARP..."
 
     ARCH=$(uname -m)
@@ -50,8 +157,6 @@ if [ ! -f "$WG_CONF" ]; then
     # 【核心安全】阅后即焚：删除注册工具和生成的账号明文文件
     rm -f wgcf wgcf-account.toml
     echo "==> [MicroWARP] 节点配置生成成功！"
-else
-    echo "==> [MicroWARP] 检测到已有持久化配置，跳过注册。"
 fi
 
 # ==========================================
