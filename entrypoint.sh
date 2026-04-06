@@ -82,10 +82,10 @@ register_team() {
     ACCT_TYPE=$(echo "$HTTP_BODY" | jq -r '.result.account.account_type // empty')
 
     # 构建 Endpoint: 优先使用 API 返回的 v4 IP (去除尾部 :0)，配合 host 中的端口
-    ENDPOINT_PORT=$(echo "$ENDPOINT_HOST" | sed 's/.*://')
-    ENDPOINT_IP=$(echo "$ENDPOINT_V4" | sed 's/:0$//')
-    if [ -n "$ENDPOINT_IP" ] && [ -n "$ENDPOINT_PORT" ]; then
-        ENDPOINT="${ENDPOINT_IP}:${ENDPOINT_PORT}"
+    TEAM_EP_PORT=$(echo "$ENDPOINT_HOST" | sed 's/.*://')
+    TEAM_EP_IP=$(echo "$ENDPOINT_V4" | sed 's/:0$//')
+    if [ -n "$TEAM_EP_IP" ] && [ -n "$TEAM_EP_PORT" ]; then
+        ENDPOINT="${TEAM_EP_IP}:${TEAM_EP_PORT}"
     else
         ENDPOINT="$ENDPOINT_HOST"
     fi
