@@ -20,6 +20,9 @@ register_team() {
 
     echo "==> [MicroWARP] [Team] 正在通过 Zero Trust API 注册设备..."
 
+    # JWT 格式预校验
+    case "$TEAM_JWT" in *.*.*) ;; *) echo "==> [ERROR] TEAM_TOKEN 格式错误，需要有效的 JWT Token"; exit 1 ;; esac
+
     # 生成 WireGuard 密钥对
     PRIVKEY=$(wg genkey)
     PUBKEY=$(echo "$PRIVKEY" | wg pubkey)
@@ -97,6 +100,9 @@ PublicKey = $PEER_PUB
 AllowedIPs = 0.0.0.0/0
 Endpoint = $ENDPOINT
 WGEOF
+
+    # 安全清理：私钥已写入配置文件，从内存中清除
+    unset PRIVKEY
 
     # 保存 Team 信息 (client_id 用于 Reserved 字节，备用)
     if [ -n "$CLIENT_ID" ]; then
