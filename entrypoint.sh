@@ -37,7 +37,7 @@ register_team() {
             \"model\": \"iPad13,8\",
             \"fcm_token\": \"\",
             \"device_token\": \"\"
-        }")
+        }") || true
 
     # 分离 HTTP body 和状态码
     HTTP_BODY=$(echo "$RESPONSE" | sed '$d')
