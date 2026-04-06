@@ -241,6 +241,18 @@ PRE_WARP_GW=$(printf '%s\n' "$PRE_WARP_ROUTE" | awk '{for (i = 1; i <= NF; i++) 
 PRE_WARP_DEV=$(printf '%s\n' "$PRE_WARP_ROUTE" | awk '{for (i = 1; i <= NF; i++) if ($i == "dev") print $(i + 1)}')
 
 echo "==> [MicroWARP] 正在启动 Linux 内核级 wg0 网卡..."
+
+# Team 模式：使用 wireguard-go 注入 Reserved 字节
+TEAM_INFO="/etc/wireguard/team_info"
+if [ -f "$TEAM_INFO" ]; then
+    . "$TEAM_INFO"
+    if [ -n "${reserved_dec:-}" ]; then
+        echo "==> [MicroWARP] [Team] 检测到 Reserved 字节，切换至 wireguard-go 用户态实现"
+        export WG_QUICK_USERSPACE_IMPLEMENTATION=wireguard-go
+        export WG_RESERVED="$reserved_dec"
+    fi
+fi
+
 wg-quick up wg0 > /dev/null 2>&1
 
 # 双栈模式下应用路由优先级

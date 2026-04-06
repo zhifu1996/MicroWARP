@@ -23,5 +23,9 @@ WORKDIR /app
 COPY entrypoint.sh .
 RUN chmod +x entrypoint.sh
 
+# wireguard-go (patched) 用于 Team 模式注入 Reserved 字节
+COPY wireguard-go-reserved /usr/local/bin/wireguard-go
+RUN chmod +x /usr/local/bin/wireguard-go
+
 # 启动引擎
 CMD ["./entrypoint.sh"]
