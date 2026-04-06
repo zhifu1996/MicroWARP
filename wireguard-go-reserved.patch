@@ -1,0 +1,126 @@
+diff --git a/device/device.go b/device/device.go
+index 6854ed8..f16a7cf 100644
+--- a/device/device.go
++++ b/device/device.go
+@@ -86,9 +86,10 @@ type Device struct {
+ 		mtu    atomic.Int32
+ 	}
+ 
+-	ipcMutex sync.RWMutex
+-	closed   chan struct{}
+-	log      *Logger
++	ipcMutex        sync.RWMutex
++	closed          chan struct{}
++	log             *Logger
++	DefaultReserved [3]byte
+ }
+ 
+ // deviceState represents the state of a Device.
+diff --git a/device/peer.go b/device/peer.go
+index ebf25f9..f892f6f 100644
+--- a/device/peer.go
++++ b/device/peer.go
+@@ -56,6 +56,7 @@ type Peer struct {
+ 	cookieGenerator             CookieGenerator
+ 	trieEntries                 list.List
+ 	persistentKeepaliveInterval atomic.Uint32
++	reserved                    [3]byte
+ }
+ 
+ func (device *Device) NewPeer(pk NoisePublicKey) (*Peer, error) {
+@@ -97,6 +98,9 @@ func (device *Device) NewPeer(pk NoisePublicKey) (*Peer, error) {
+ 	handshake.remoteStatic = pk
+ 	handshake.mutex.Unlock()
+ 
++	// apply default reserved bytes
++	peer.reserved = device.DefaultReserved
++
+ 	// reset endpoint
+ 	peer.endpoint.Lock()
+ 	peer.endpoint.val = nil
+@@ -133,6 +137,14 @@ func (peer *Peer) SendBuffers(buffers [][]byte) error {
+ 	}
+ 	peer.endpoint.Unlock()
+ 
++	// Inject Reserved bytes into all WireGuard message types (1-4)
++	// Must happen AFTER MAC computation, right before network send
++	for i := range buffers {
++		if len(buffers[i]) > 3 && buffers[i][0] > 0 && buffers[i][0] < 5 {
++			copy(buffers[i][1:4], peer.reserved[:])
++		}
++	}
++
+ 	err := peer.device.net.bind.Send(buffers, endpoint)
+ 	if err == nil {
+ 		var totalLen uint64
+diff --git a/device/receive.go b/device/receive.go
+index 1392957..82b8cd9 100644
+--- a/device/receive.go
++++ b/device/receive.go
+@@ -134,7 +134,7 @@ func (device *Device) RoutineReceiveIncoming(maxBatchSize int, recv conn.Receive
+ 			// check size of packet
+ 
+ 			packet := bufsArrs[i][:size]
+-			msgType := binary.LittleEndian.Uint32(packet[:4])
++			msgType := binary.LittleEndian.Uint32(packet[:4]) & 0xFF
+ 
+ 			switch msgType {
+ 
+@@ -315,6 +315,14 @@ func (device *Device) RoutineHandshake(id int) {
+ 
+ 			// check mac fields and maybe ratelimit
+ 
++			// Zero out Reserved bytes (1-3) before MAC verification,
++			// as MACs are computed with these bytes as zero
++			var savedReserved [3]byte
++			copy(savedReserved[:], elem.packet[1:4])
++			elem.packet[1] = 0
++			elem.packet[2] = 0
++			elem.packet[3] = 0
++
+ 			if !device.cookieChecker.CheckMAC1(elem.packet) {
+ 				device.log.Verbosef("Received packet with invalid mac1")
+ 				goto skip
+diff --git a/main.go b/main.go
+index b6989e2..f8ef9e4 100644
+--- a/main.go
++++ b/main.go
+@@ -13,6 +13,7 @@ import (
+ 	"os/signal"
+ 	"runtime"
+ 	"strconv"
++	"strings"
+ 
+ 	"golang.org/x/sys/unix"
+ 	"golang.zx2c4.com/wireguard/conn"
+@@ -224,6 +225,30 @@ func main() {
+ 
+ 	device := device.NewDevice(tdev, conn.NewDefaultBind(), logger)
+ 
++	// apply WG_RESERVED env var (e.g. "15,190,193")
++	if reservedStr := os.Getenv("WG_RESERVED"); reservedStr != "" {
++		parts := strings.Split(reservedStr, ",")
++		if len(parts) == 3 {
++			var reserved [3]byte
++			valid := true
++			for i, p := range parts {
++				v, err := strconv.ParseUint(strings.TrimSpace(p), 10, 8)
++				if err != nil {
++					logger.Errorf("Invalid WG_RESERVED byte %q: %v", p, err)
++					valid = false
++					break
++				}
++				reserved[i] = byte(v)
++			}
++			if valid {
++				device.DefaultReserved = reserved
++				logger.Verbosef("Applied reserved bytes: %d,%d,%d", reserved[0], reserved[1], reserved[2])
++			}
++		} else {
++			logger.Errorf("WG_RESERVED must have 3 comma-separated values, got %d", len(parts))
++		}
++	}
++
+ 	logger.Verbosef("Device started")
+ 
+ 	errs := make(chan error)
