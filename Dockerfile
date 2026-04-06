@@ -13,7 +13,7 @@ FROM golang:1.24-alpine AS wireguard-go-builder
 RUN apk add --no-cache git patch
 
 # 克隆上游 wireguard-go 并定位到已验证的 commit
-RUN git clone https://git.zx2c4.com/wireguard-go /wg && \
+RUN git clone https://github.com/WireGuard/wireguard-go.git /wg && \
     cd /wg && git checkout f333402
 
 # 应用 Reserved 字节补丁 (Team 模式支持)
