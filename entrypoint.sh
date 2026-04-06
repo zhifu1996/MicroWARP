@@ -75,10 +75,20 @@ register_team() {
 
     # 解析响应中的关键字段
     PEER_PUB=$(echo "$HTTP_BODY" | jq -r '.result.config.peers[0].public_key // empty')
-    ENDPOINT=$(echo "$HTTP_BODY" | jq -r '.result.config.peers[0].endpoint.host // empty')
+    ENDPOINT_HOST=$(echo "$HTTP_BODY" | jq -r '.result.config.peers[0].endpoint.host // empty')
+    ENDPOINT_V4=$(echo "$HTTP_BODY" | jq -r '.result.config.peers[0].endpoint.v4 // empty')
     V4_ADDR=$(echo "$HTTP_BODY" | jq -r '.result.config.interface.addresses.v4 // empty')
     CLIENT_ID=$(echo "$HTTP_BODY" | jq -r '.result.config.client_id // empty')
     ACCT_TYPE=$(echo "$HTTP_BODY" | jq -r '.result.account.account_type // empty')
+
+    # 构建 Endpoint: 优先使用 API 返回的 v4 IP (去除尾部 :0)，配合 host 中的端口
+    ENDPOINT_PORT=$(echo "$ENDPOINT_HOST" | sed 's/.*://')
+    ENDPOINT_IP=$(echo "$ENDPOINT_V4" | sed 's/:0$//')
+    if [ -n "$ENDPOINT_IP" ] && [ -n "$ENDPOINT_PORT" ]; then
+        ENDPOINT="${ENDPOINT_IP}:${ENDPOINT_PORT}"
+    else
+        ENDPOINT="$ENDPOINT_HOST"
+    fi
 
     # 验证必要字段
     if [ -z "$PEER_PUB" ] || [ -z "$ENDPOINT" ] || [ -z "$V4_ADDR" ]; then
